@@ -1,0 +1,50 @@
+#include <tunables/global>
+
+profile trinetra-worker flags=(attach_disconnected,mediate_deleted) {
+  #include <abstractions/base>
+  #include <abstractions/nameservice>
+  #include <abstractions/openssl>
+
+  network inet stream,
+  network inet dgram,
+  network inet6 stream,
+  network inet6 dgram,
+
+  /app/** rix,
+  /usr/** rix,
+  /bin/** rix,
+  /sbin/** rix,
+  /lib/** rix,
+  /lib64/** rix,
+  /opt/** rix,
+  /ms-playwright/** rix,
+  /etc/** r,
+  /usr/share/** r,
+  /usr/local/** rix,
+  /proc/** r,
+  /sys/** r,
+  /dev/null rw,
+  /dev/zero rw,
+  /dev/random r,
+  /dev/urandom r,
+  /dev/shm/** rw,
+  /tmp/** rw,
+  /work/** rw,
+  /run/** rw,
+
+  deny /proc/sys/** w,
+  deny /sys/** w,
+  deny /etc/shadow r,
+  deny /etc/gshadow r,
+  deny /root/** rw,
+  deny /home/** rw,
+  deny /host/** rw,
+  deny /var/run/docker.sock rw,
+  deny /run/docker.sock rw,
+
+  deny mount,
+  deny umount,
+  deny pivot_root,
+  deny ptrace,
+  deny /proc/sysrq-trigger rw,
+}

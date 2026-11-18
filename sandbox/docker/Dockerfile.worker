@@ -1,0 +1,33 @@
+FROM mcr.microsoft.com/playwright/python:v1.58.0-noble
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
+    HOME=/tmp \
+    TMPDIR=/tmp
+
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        ca-certificates \
+        ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN groupadd --gid 10001 sandbox \
+    && useradd --uid 10001 --gid 10001 --no-create-home --home-dir /tmp --shell /usr/sbin/nologin sandbox \
+    && mkdir -p /work /tmp /run \
+    && chown 10001:10001 /work /tmp \
+    && chmod 0700 /work /tmp
+
+WORKDIR /app
+
+COPY requirements-worker.txt /tmp/requirements-worker.txt
+RUN pip install --no-cache-dir --no-compile -r /tmp/requirements-worker.txt \
+    && rm -f /tmp/requirements-worker.txt
+
+COPY __init__.py worker.py security.py network_policy.py config.py /app/sandbox/
+
+RUN chmod -R a-w /app
+
+USER 10001:10001
+
+CMD ["python", "-m", "sandbox.worker"]
