@@ -157,7 +157,7 @@ Always run exactly one manager process. Sessions are in-memory, and the manager 
 | `SANDBOX_DOCKER_URL` | `unix:///var/run/docker.sock` | Docker endpoint |
 | `SANDBOX_DOCKER_RUNTIME` | none | Optional runtime such as `runsc` or `kata` |
 | `SANDBOX_WORKER_IMAGE` | `trinetra-sandbox-worker:latest` | Built locally |
-| `SANDBOX_SECCOMP_PROFILE` | `sandbox/docker/seccomp-worker.json` | Host path readable by Docker |
+| `SANDBOX_SECCOMP_PROFILE` | `sandbox/docker/seccomp-worker.json` | Host path read by the manager and sent inline to Docker |
 | `SANDBOX_APPARMOR_PROFILE` | none | Optional loaded AppArmor profile name |
 | `SANDBOX_ENABLE_HOST_FIREWALL` | `true` | Must remain true for isolation |
 | `SANDBOX_ALLOW_UNSAFE_NETWORK` | `false` | Explicit development bypass; never use for hostile content |
@@ -290,7 +290,7 @@ The tests cover host file/tar escapes, private and metadata address blocking, re
 
 - Egress is intentionally limited to TCP 80 and 443. Sites requiring other ports will fail and produce evidence of that failure.
 - IPv6 is disabled on sandbox networks. If the host requires IPv6 egress, add equivalent ip6tables enforcement before enabling IPv6.
-- The manager must run with `CAP_NET_ADMIN` and Docker socket access. Running without both fails closed unless `SANDBOX_ALLOW_UNSAFE_NETWORK=1` is explicitly set for development.
+- The manager must run with `CAP_NET_ADMIN` and Docker socket access. Running without both fails closed unless `SANDBOX_ALLOW_UNSAFE_NETWORK=1` is explicitly set for development. Unsafe mode has no host firewall and uses Docker default DNS instead of the filtered resolver; use it only for local development with non-hostile content.
 - AppArmor must be supported and loaded by the host. If the profile is not loaded, the manager fails to start the worker rather than silently dropping the control.
 - Playwright browsers are disposable but are not lightweight. Size memory and CPU limits for the expected pages.
 - Downloads are stored only when `allow_downloads` is requested; they are never opened or executed. The `/work` volume is ephemeral and destroyed with the container. Media probing and frame extraction require `analyze_media` or `extract_video_frames`.

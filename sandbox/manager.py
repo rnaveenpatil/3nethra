@@ -201,7 +201,11 @@ class DockerSandboxRuntime:
         options = ["no-new-privileges:true"]
         if self.settings.seccomp_profile is not None:
             profile = Path(self.settings.seccomp_profile).expanduser().resolve()
-            options.append(f"seccomp={profile}")
+            try:
+                loaded = json.loads(profile.read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise RuntimeError("sandbox seccomp profile is invalid") from exc
+            options.append(f"seccomp={json.dumps(loaded, separators=(',', ':'))}")
         if self.settings.apparmor_profile:
             options.append(f"apparmor={self.settings.apparmor_profile}")
         return options
@@ -236,10 +240,10 @@ class DockerSandboxRuntime:
                 "LC_ALL": "C.UTF-8",
             },
             "network": network_name,
-            "dns": [gateway],
+            "dns": [gateway] if self.settings.enable_host_firewall else [],
             "read_only": True,
             "tmpfs": {
-                "/tmp": f"rw,nosuid,nodev,size={self.settings.worker_tmpfs_bytes},uid={uid},gid={gid},mode=0700",
+                "/tmp": f"rw,nosuid,nodev,noexec,size={self.settings.worker_tmpfs_bytes},uid={uid},gid={gid},mode=0700",
                 "/run": "rw,nosuid,nodev,noexec,size=16m,mode=0755",
             },
             "volumes": ["/work"],
@@ -255,12 +259,10 @@ class DockerSandboxRuntime:
             "log_config": log_config,
             "privileged": False,
             "devices": [],
-            "binds": {},
             "auto_remove": False,
             "stdin_open": False,
             "tty": False,
             "init": True,
-            "stop_timeout": 5,
             "labels": self._labels(session_id),
         }
         if self.settings.docker_runtime:
@@ -300,13 +302,14 @@ class DockerSandboxRuntime:
                 logger=_structured_log,
             )
             await asyncio.to_thread(env.isolation.install)
-            env.resolver = network_policy.FilteringDNSResolver(
-                [gateway],
-                port=self.settings.dns_port,
-                upstreams=self.settings.dns_upstreams,
-                logger=_structured_log,
-            )
-            await env.resolver.start()
+            if self.settings.enable_host_firewall:
+                env.resolver = network_policy.FilteringDNSResolver(
+                    [gateway],
+                    port=self.settings.dns_port,
+                    upstreams=self.settings.dns_upstreams,
+                    logger=_structured_log,
+                )
+                await env.resolver.start()
             env.container = await self._call(
                 self.client.containers.create,
                 **self._worker_kwargs(session_id, network_name, gateway),
@@ -400,18 +403,23 @@ class DockerSandboxRuntime:
         try:
             stream, _stat = await self._call(env.container.get_archive, "/work/evidence")
             try:
-                await asyncio.to_thread(
-                    security.safe_extract_tar,
+                archive = await asyncio.to_thread(
+                    security.read_stream_bounded,
                     stream,
-                    staging,
-                    max_bytes=self.settings.max_evidence_bytes,
-                    max_files=self.settings.max_evidence_files,
+                    self.settings.max_evidence_bytes,
                 )
             finally:
                 close = getattr(stream, "close", None)
                 if close is not None:
                     with contextlib.suppress(Exception):
                         close()
+            await asyncio.to_thread(
+                security.safe_extract_tar,
+                archive,
+                staging,
+                max_bytes=self.settings.max_evidence_bytes,
+                max_files=self.settings.max_evidence_files,
+            )
             nested = staging / "evidence"
             if nested.is_dir() and not (staging / "results.json").is_file():
                 payload_root = nested
@@ -434,6 +442,7 @@ class DockerSandboxRuntime:
             for item in payload_root.iterdir():
                 os.replace(item, destination / item.name)
         except Exception:
+            shutil.rmtree(destination, ignore_errors=True)
             return CollectedEvidence()
         finally:
             shutil.rmtree(staging, ignore_errors=True)
@@ -847,6 +856,7 @@ class SandboxService:
                 }
             )
         finally:
+            self._remove_inputs(session)
             if not session.logs and env is not None:
                 with contextlib.suppress(Exception):
                     session.logs = await self.runtime.logs(env, self.settings.max_log_bytes)

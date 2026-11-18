@@ -301,9 +301,9 @@ def test_docker_collect_strips_archive_root(tmp_path: Path) -> None:
     )
 
     class ArchiveContainer:
-        def get_archive(self, path: str) -> tuple[io.BytesIO, dict[str, Any]]:
+        def get_archive(self, path: str) -> tuple[Any, dict[str, Any]]:
             assert path == "/work/evidence"
-            return io.BytesIO(archive), {}
+            return iter([archive]), {}
 
     destination = tmp_path / "collected"
     collected = asyncio.run(

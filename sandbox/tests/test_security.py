@@ -111,3 +111,12 @@ def test_artifact_name_validation() -> None:
     for name in ("../x", "/etc/passwd", "a/../../b", ""):
         with pytest.raises(security.SecurityError):
             security.require_safe_artifact_name(name)
+
+
+def test_bounded_stream_reads_file_like_and_iterables() -> None:
+    assert security.read_stream_bounded(io.BytesIO(b"abcdef"), 10) == b"abcdef"
+    assert security.read_stream_bounded(iter([b"abc", b"def"]), 10) == b"abcdef"
+    with pytest.raises(security.EvidenceLimitError):
+        security.read_stream_bounded(io.BytesIO(b"abcdef"), 5)
+    with pytest.raises(security.EvidenceLimitError):
+        security.read_stream_bounded(iter([b"abcdef"]), 5)

@@ -48,10 +48,9 @@ def test_worker_container_configuration_is_hardened(tmp_path: Path) -> None:
     assert kwargs["mem_limit"] == settings.worker_memory_bytes
     assert kwargs["memswap_limit"] == settings.worker_memory_bytes
     assert kwargs["volumes"] == ["/work"]
-    assert kwargs["binds"] == {}
     assert kwargs["devices"] == []
     assert kwargs["network"] == "trinetra-test"
-    assert kwargs["dns"] == ["172.31.0.1"]
+    assert kwargs["dns"] == []
     assert "no-new-privileges:true" in kwargs["security_opt"]
     assert any("seccomp=" in item for item in kwargs["security_opt"])
     assert "/var/run/docker.sock" not in json.dumps(kwargs)

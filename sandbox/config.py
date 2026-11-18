@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ipaddress
+import json
 import os
 import tempfile
 from dataclasses import dataclass
@@ -83,7 +84,6 @@ class Settings:
     worker_memory_bytes: int = 1024 * 1024 * 1024
     worker_pids: int = 256
     worker_tmpfs_bytes: int = 512 * 1024 * 1024
-    worker_work_bytes: int = 256 * 1024 * 1024
     worker_shm_bytes: int = 256 * 1024 * 1024
     max_upload_bytes: int = 25 * 1024 * 1024
     max_evidence_bytes: int = 64 * 1024 * 1024
@@ -131,7 +131,6 @@ class Settings:
             worker_memory_bytes=_env_int("SANDBOX_WORKER_MEMORY_BYTES", 1024 * 1024 * 1024),
             worker_pids=_env_int("SANDBOX_WORKER_PIDS", 256),
             worker_tmpfs_bytes=_env_int("SANDBOX_WORKER_TMPFS_BYTES", 512 * 1024 * 1024),
-            worker_work_bytes=_env_int("SANDBOX_WORKER_WORK_BYTES", 256 * 1024 * 1024),
             worker_shm_bytes=_env_int("SANDBOX_WORKER_SHM_BYTES", 256 * 1024 * 1024),
             max_upload_bytes=_env_int("SANDBOX_MAX_UPLOAD_BYTES", 25 * 1024 * 1024),
             max_evidence_bytes=_env_int("SANDBOX_MAX_EVIDENCE_BYTES", 64 * 1024 * 1024),
@@ -187,8 +186,6 @@ class Settings:
             raise RuntimeError("SANDBOX_API_REQUEST_LIMIT_BYTES must be >= SANDBOX_MAX_UPLOAD_BYTES")
         if self.worker_tmpfs_bytes < 64 * 1024 * 1024:
             raise RuntimeError("SANDBOX_WORKER_TMPFS_BYTES is too small")
-        if self.worker_work_bytes < 16 * 1024 * 1024:
-            raise RuntimeError("SANDBOX_WORKER_WORK_BYTES is too small")
         if not self.dns_upstreams:
             raise RuntimeError("SANDBOX_DNS_UPSTREAMS must not be empty")
         for upstream in self.dns_upstreams:
@@ -205,6 +202,12 @@ class Settings:
         if not self.allow_default_seccomp:
             if self.seccomp_profile is None or not Path(self.seccomp_profile).is_file():
                 raise RuntimeError("sandbox seccomp profile is missing")
+            try:
+                loaded = json.loads(Path(self.seccomp_profile).read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise RuntimeError("sandbox seccomp profile is invalid") from exc
+            if not isinstance(loaded, dict):
+                raise RuntimeError("sandbox seccomp profile is invalid")
         if self.evidence_root.exists() and not self.evidence_root.is_dir():
             raise RuntimeError("SANDBOX_EVIDENCE_ROOT must be a directory")
 

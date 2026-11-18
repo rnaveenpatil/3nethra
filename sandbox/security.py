@@ -375,6 +375,30 @@ def safe_extract_tar(
     return {"files": extracted, "bytes": total_bytes}
 
 
+
+def read_stream_bounded(source: Any, max_bytes: int, chunk_size: int = 256 * 1024) -> bytes:
+    if isinstance(source, (bytes, bytearray, memoryview)):
+        raw = bytes(source)
+        if len(raw) > max_bytes:
+            raise EvidenceLimitError("stream exceeds the configured limit")
+        return raw
+    chunks: list[bytes] = []
+    total = 0
+    read = getattr(source, "read", None)
+    if callable(read):
+        iterator = iter(lambda: read(chunk_size), b"")
+    else:
+        iterator = iter(source)
+    for chunk in iterator:
+        if not isinstance(chunk, (bytes, bytearray, memoryview)):
+            raise SecurityError("stream returned a non-bytes chunk")
+        data = bytes(chunk)
+        total += len(data)
+        if total > max_bytes:
+            raise EvidenceLimitError("stream exceeds the configured limit")
+        chunks.append(data)
+    return b"".join(chunks)
+
 def build_tar(files: Mapping[str, bytes], *, uid: int = 0, gid: int = 0) -> bytes:
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode="w") as archive:
