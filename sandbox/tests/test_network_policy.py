@@ -107,6 +107,13 @@ def test_dns_answer_validation() -> None:
     assert network_policy.validate_dns_answer(record) == ("93.184.216.34",)
 
 
+def test_dns_answer_supports_answer_objects_with_response_section() -> None:
+    dns = pytest.importorskip("dns")
+    rrset = FakeAnswer(dns.rdatatype.A, ["93.184.216.34"])
+    record = SimpleNamespace(answer=None, response=SimpleNamespace(answer=[rrset]))
+    assert network_policy.validate_dns_answer(record) == ("93.184.216.34",)
+
+
 def test_dns_answer_with_private_address_is_blocked() -> None:
     dns = pytest.importorskip("dns")
     rrset = FakeAnswer(dns.rdatatype.A, ["10.0.0.5"])

@@ -154,6 +154,30 @@ def analyze_browser(ledger: EvidenceLedger, evidence: dict[str, Any]) -> None:
             data={"iframes": iframe_count},
             code="iframe_usage",
         )
+    responses = browser.get("responses") if isinstance(browser.get("responses"), list) else []
+    for response in responses:
+        if not isinstance(response, dict):
+            continue
+        url = safe_text(response.get("url", ""), 2048)
+        if not url:
+            continue
+        headers = response.get("headers") if isinstance(response.get("headers"), dict) else {}
+        content_type = headers.get("content-type") or headers.get("Content-Type") or ""
+        ledger.add(
+            source="sandbox.browser",
+            category="network",
+            title=f"Browser network response: {url}",
+            severity="info",
+            confidence=0.8,
+            data={
+                "url": url,
+                "status": response.get("status"),
+                "resource_type": safe_text(response.get("resource_type", ""), 64),
+                "content_type": safe_text(content_type, 256),
+                "location": safe_text(response.get("location", ""), 2048),
+            },
+            code="browser_network_response",
+        )
     blocked = browser.get("blocked_requests") if isinstance(browser.get("blocked_requests"), list) else []
     if blocked:
         ledger.add(

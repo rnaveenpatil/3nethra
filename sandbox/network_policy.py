@@ -295,9 +295,17 @@ def validate_redirect(base_url: str, location: str, **kwargs: Any) -> ValidatedU
     return validate_url(target, **kwargs)
 
 
+def _answer_rrsets(record: Any) -> Iterable[Any]:
+    response = getattr(record, "response", None)
+    rrsets = getattr(response, "answer", None)
+    if rrsets:
+        return rrsets
+    return getattr(record, "answer", None) or []
+
+
 def extract_dns_addresses(record: Any) -> tuple[str, ...]:
     addresses: list[str] = []
-    for part in getattr(record, "answer", []) or []:
+    for part in _answer_rrsets(record):
         rdtype = getattr(part, "rdtype", None)
         if rdtype not in {dns.rdatatype.A if dns else 1, dns.rdatatype.AAAA if dns else 28}:
             continue
@@ -442,7 +450,7 @@ class FilteringDNSResolver:
             response.set_rcode(dns.rcode.REFUSED)
             return response
         min_ttl = self.max_ttl
-        for rrset in upstream_response.answer:
+        for rrset in _answer_rrsets(upstream_response):
             copied = copy.deepcopy(rrset)
             copied.ttl = max(0, min(int(copied.ttl), self.max_ttl))
             min_ttl = min(min_ttl, copied.ttl)

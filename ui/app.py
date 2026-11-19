@@ -24,6 +24,8 @@ from textual.widgets import (
     Select,
     Static,
     Switch,
+    TabbedContent,
+    TabPane,
 )
 
 from storage.history import HistoryStore
@@ -154,17 +156,12 @@ class TrinetraTUI(App[None]):
     }
 
     #tables {
-        height: 12;
+        height: 14;
         margin-top: 1;
     }
 
-    #steps {
-        width: 2fr;
-        margin-right: 1;
-    }
-
-    #coverage {
-        width: 1fr;
+    #steps, #coverage, #evidence {
+        height: 1fr;
     }
 
     #history {
@@ -278,9 +275,13 @@ class TrinetraTUI(App[None]):
                     yield Static("Idle", id="run_status")
                 yield Static("", id="status")
                 yield RichLog(id="activity", max_lines=2000, wrap=True)
-                with Horizontal(id="tables"):
-                    yield DataTable(id="steps", cursor_type="row")
-                    yield DataTable(id="coverage", cursor_type="row")
+                with TabbedContent(id="tables", initial="evidence_tab"):
+                    with TabPane("Evidence", id="evidence_tab"):
+                        yield DataTable(id="evidence", cursor_type="row")
+                    with TabPane("Steps", id="steps_tab"):
+                        yield DataTable(id="steps", cursor_type="row")
+                    with TabPane("Coverage", id="coverage_tab"):
+                        yield DataTable(id="coverage", cursor_type="row")
         yield Footer()
 
     async def on_mount(self) -> None:
@@ -302,6 +303,8 @@ class TrinetraTUI(App[None]):
         steps.add_columns("Phase", "Tool", "Status", "ms")
         coverage = self.query_one("#coverage", DataTable)
         coverage.add_columns("Coverage", "Status", "Detail")
+        evidence = self.query_one("#evidence", DataTable)
+        evidence.add_columns("Source", "Category", "Title", "Severity", "Conf", "Details")
         history = self.query_one("#history", DataTable)
         history.add_columns("Time", "Type", "Verdict", "Risk", "Target")
 
@@ -562,8 +565,60 @@ class TrinetraTUI(App[None]):
             coverage_table.add_row(
                 str(item.get("name", "")),
                 str(item.get("status", "")),
-                str(item.get("detail", ""))[:80],
+                str(item.get("detail", "")),
             )
+        evidence_table = self.query_one("#evidence", DataTable)
+        evidence_table.clear(columns=False)
+        for index, item in enumerate(report.get("evidence", []) or []):
+            if not isinstance(item, dict):
+                item = {"title": str(item)}
+            data = item.get("data")
+            detail = str(item.get("description") or "").strip()
+            if data:
+                rendered = json.dumps(data, ensure_ascii=False, sort_keys=True)
+                detail = f"{detail} {rendered}".strip()
+            if not detail:
+                detail = str(item.get("code") or "")
+            try:
+                confidence = f"{float(item.get('confidence', 0)):.2f}"
+            except (TypeError, ValueError):
+                confidence = str(item.get("confidence", ""))
+            evidence_table.add_row(
+                str(item.get("source", "")),
+                str(item.get("category", "")),
+                str(item.get("title", "")),
+                str(item.get("severity", "")),
+                confidence,
+                detail,
+                key=str(index),
+            )
+
+    def _show_evidence_detail(self, index: int) -> None:
+        report = self._last_report or {}
+        items = report.get("evidence", []) or []
+        if index < 0 or index >= len(items) or not isinstance(items[index], dict):
+            return
+        item = items[index]
+        activity = self.query_one("#activity", RichLog)
+        activity.write(Text(""))
+        activity.write(Text(f"Evidence {item.get('id', '')}", style="bold cyan"))
+        activity.write(Text(f"Source: {item.get('source', '')}"))
+        activity.write(Text(f"Category: {item.get('category', '')}"))
+        activity.write(Text(f"Title: {item.get('title', '')}"))
+        activity.write(Text(f"Severity: {item.get('severity', '')}  Confidence: {item.get('confidence', '')}"))
+        description = str(item.get("description") or "").strip()
+        if description:
+            activity.write(Text(f"Description: {description}"))
+        data = item.get("data")
+        if data:
+            activity.write(Text("Data:", style="bold"))
+            activity.write(Text(json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True)))
+
+    @on(DataTable.RowSelected, "#evidence")
+    def _evidence_selected(self, event: DataTable.RowSelected) -> None:
+        value = event.row_key.value
+        if value is not None:
+            self._show_evidence_detail(int(value))
 
     @on(Input.Submitted, "#target")
     def _target_submitted(self, event: Input.Submitted) -> None:

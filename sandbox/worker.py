@@ -240,10 +240,14 @@ def _truncate_text(value: str, limit: int = MAX_TEXT_PREVIEW) -> str:
 
 
 def _safe_error(exc: BaseException) -> dict[str, str]:
-    return {
+    error = {
         "type": type(exc).__name__,
         "message": security.sanitize_text(str(exc), 1024),
     }
+    code = getattr(exc, "code", None)
+    if isinstance(code, str) and code:
+        error["code"] = security.sanitize_text(code, 128)
+    return error
 
 
 def _magic_type(prefix: bytes) -> str:
@@ -655,9 +659,30 @@ async def _http_probe(url: str, options: dict[str, object], limits: dict[str, in
         while True:
             try:
                 validated = await asyncio.wait_for(network_policy.resolve_and_validate_url(current), timeout=15)
+            except network_policy.NetworkPolicyError as exc:
+                error = _safe_error(exc)
+                result["warnings"].append({"stage": "validate", "error": error})
+                if exc.code == "dns_failure":
+                    result["final"] = {
+                        "url": security.sanitize_url(current),
+                        "resolution_failed": True,
+                        "error": error,
+                    }
+                else:
+                    result["final"] = {
+                        "url": security.sanitize_url(current),
+                        "blocked": True,
+                        "error": error,
+                    }
+                break
             except Exception as exc:
-                result["warnings"].append({"stage": "validate", "error": _safe_error(exc)})
-                result["final"] = {"url": security.sanitize_url(current), "blocked": True}
+                error = _safe_error(exc)
+                result["warnings"].append({"stage": "validate", "error": error})
+                result["final"] = {
+                    "url": security.sanitize_url(current),
+                    "resolution_failed": True,
+                    "error": error,
+                }
                 break
             entry: dict[str, object] = {
                 "url": security.sanitize_url(validated.url),
@@ -817,8 +842,13 @@ async def _browser_probe(url: str, options: dict[str, object], limits: dict[str,
         try:
             await asyncio.wait_for(network_policy.resolve_and_validate_url(target), timeout=10)
             dns_cache[host] = (now + 30, True)
+        except network_policy.NetworkPolicyError as exc:
+            if exc.code == "dns_failure":
+                dns_cache.pop(host, None)
+            else:
+                dns_cache[host] = (now + 30, False)
+            raise
         except Exception:
-            dns_cache[host] = (now + 30, False)
             raise
 
     async def route_handler(route: object) -> None:
@@ -835,11 +865,23 @@ async def _browser_probe(url: str, options: dict[str, object], limits: dict[str,
         try:
             await validate_browser_url(request.url)
             await route.continue_()
-        except Exception as exc:
+        except network_policy.NetworkPolicyError as exc:
+            if exc.code == "dns_failure":
+                await route.continue_()
+                return
             if blocked_count < MAX_BLOCKED_REQUESTS:
-                blocked_requests.append({"url": security.sanitize_url(request.url), "reason": _safe_error(exc)["message"]})
+                error = _safe_error(exc)
+                blocked_requests.append(
+                    {
+                        "url": security.sanitize_url(request.url),
+                        "reason": error.get("message", ""),
+                        "code": error.get("code", ""),
+                    }
+                )
                 blocked_count += 1
             await route.abort("blockedbyclient")
+        except Exception:
+            await route.continue_()
 
     def response_handler(response: object) -> None:
         if len(responses) >= MAX_BROWSER_RESPONSES:
@@ -1064,10 +1106,19 @@ async def _investigate_url(task: dict[str, object], options: dict[str, object], 
             timeout=15,
         )
         evidence["dns"] = {"status": "ok", "addresses": list(addresses)}
+    except network_policy.NetworkPolicyError as exc:
+        error = _safe_error(exc)
+        if exc.code == "dns_failure":
+            evidence["dns"] = {"status": "failed", "error": error}
+            evidence["errors"].append({"stage": "dns", **error})
+        else:
+            evidence["outcome"] = "blocked"
+            evidence["dns"] = {"status": "blocked", "error": error}
+            return evidence
     except Exception as exc:
-        evidence["outcome"] = "blocked"
-        evidence["dns"] = {"status": "blocked", "error": _safe_error(exc)}
-        return evidence
+        error = _safe_error(exc)
+        evidence["dns"] = {"status": "failed", "error": error}
+        evidence["errors"].append({"stage": "dns", **error})
     _set_status("http", 25)
     try:
         evidence["http"] = await _http_probe(validated.url, options, limits, writer)

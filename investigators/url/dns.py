@@ -76,21 +76,42 @@ def analyze_dns(ledger: EvidenceLedger, evidence: dict[str, Any]) -> None:
         else:
             ledger.mark_coverage("dns", "partial", "DNS result contained no addresses")
             ledger.warn("DNS resolution returned no addresses")
-    elif status == "blocked":
+    elif status in {"blocked", "failed"}:
         error = dns.get("error")
         code = safe_text(error.get("code", ""), 128) if isinstance(error, dict) else ""
         message = safe_text(error.get("message", ""), 512) if isinstance(error, dict) else ""
-        ledger.mark_coverage("dns", "blocked", message or "DNS destination was blocked")
-        ledger.add(
-            source="sandbox.dns",
-            category="network",
-            title="Destination was blocked by network policy",
-            severity="high",
-            confidence=0.9,
-            description="The sandbox refused the destination, which can indicate SSRF, private addressing or an unsafe scheme.",
-            data={"host": host, "policy_code": code, "message": message},
-            code="private_destination_blocked",
-        )
+        if status == "blocked" and code in {
+            "forbidden_destination",
+            "forbidden_hostname",
+            "forbidden_port",
+            "invalid_scheme",
+            "invalid_url",
+        }:
+            ledger.mark_coverage("dns", "blocked", message or "DNS destination was blocked")
+            ledger.add(
+                source="sandbox.dns",
+                category="network",
+                title="Destination was blocked by network policy",
+                severity="high",
+                confidence=0.9,
+                description="The sandbox refused the destination because it resolved to a forbidden address or hostname.",
+                data={"host": host, "policy_code": code, "message": message},
+                code="private_destination_blocked",
+            )
+        else:
+            reason = message or "DNS resolution did not complete"
+            ledger.mark_coverage("dns", "failed", reason)
+            ledger.warn("DNS resolution did not complete inside the sandbox")
+            ledger.add(
+                source="sandbox.dns",
+                category="network",
+                title="DNS resolution did not complete",
+                severity="info",
+                confidence=0.4,
+                description="The target could not be resolved inside the sandbox; this is not evidence of malicious intent.",
+                data={"host": host, "policy_code": code, "message": message},
+                code="dns_resolution_failed",
+            )
     else:
         ledger.mark_coverage("dns", "failed", "DNS status was not successful")
         ledger.warn("DNS resolution did not complete")

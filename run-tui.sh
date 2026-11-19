@@ -14,8 +14,12 @@ AUTO_START="${TRINETRA_TUI_AUTO_START:-true}"
 case "${AUTO_START,,}" in
   1|true|yes|on)
     if [ "$(id -u)" -ne 0 ] && ! sudo -n true >/dev/null 2>&1; then
-      printf 'Authorize sandbox startup (sudo password):\n'
-      sudo -v || true
+      printf 'Sandbox startup needs sudo. Enter your password once:\n'
+      if ! sudo -v; then
+        printf '\nSudo authorization failed. Sandbox cannot start.\n' >&2
+        printf 'Run ./run-tui.sh again and enter the sudo password.\n' >&2
+        exit 1
+      fi
       printf '\n'
     fi
     ;;

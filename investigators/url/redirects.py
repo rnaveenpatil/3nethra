@@ -57,8 +57,32 @@ def analyze_http(ledger: EvidenceLedger, evidence: dict[str, Any]) -> None:
     chain = http.get("redirect_chain")
     chain = [item for item in chain if isinstance(item, dict)] if isinstance(chain, list) else []
     final = http.get("final") if isinstance(http.get("final"), dict) else {}
-    if chain or final:
-        ledger.mark_coverage("http", "ok", f"{len(chain)} HTTP responses")
+    responded = [item for item in chain if isinstance(item.get("status"), int)]
+    if responded:
+        ledger.mark_coverage("http", "ok", f"{len(responded)} HTTP responses")
+    elif final.get("blocked") or final.get("redirect_blocked"):
+        detail = "HTTP destination was blocked by network policy"
+        ledger.mark_coverage("http", "blocked", detail)
+        ledger.warn(detail)
+    elif final.get("resolution_failed") or final.get("error"):
+        detail = "HTTP request could not be completed"
+        ledger.mark_coverage("http", "failed", detail)
+        ledger.warn(detail)
+        error = final.get("error") if isinstance(final.get("error"), dict) else {}
+        ledger.add(
+            source="sandbox.http",
+            category="network",
+            title="HTTP request did not complete",
+            severity="info",
+            confidence=0.4,
+            description="The HTTP probe could not reach the target; this is not evidence of malicious intent.",
+            data={
+                "url": safe_text(final.get("url", ""), 4096),
+                "error": safe_text(error.get("message", ""), 512),
+                "code": safe_text(error.get("code", ""), 128),
+            },
+            code="http_request_failed",
+        )
     else:
         ledger.mark_coverage("http", "failed", "No HTTP response was recorded")
         ledger.warn("No HTTP response was captured")
@@ -92,6 +116,28 @@ def analyze_http(ledger: EvidenceLedger, evidence: dict[str, Any]) -> None:
         headers = item.get("headers") if isinstance(item.get("headers"), dict) else {}
         location = safe_text(headers.get("location", ""), 2048)
         current = safe_text(item.get("url", ""), 4096)
+        ledger.add(
+            source="sandbox.http",
+            category="network",
+            title=f"HTTP network response: {current}",
+            severity="info",
+            confidence=0.9,
+            data={
+                "url": current,
+                "host": safe_text(item.get("host", ""), 255),
+                "port": item.get("port"),
+                "addresses": item.get("addresses"),
+                "status": status,
+                "reason": safe_text(item.get("reason", ""), 128),
+                "content_type": safe_text(item.get("content_type", ""), 256),
+                "content_length": item.get("content_length"),
+                "body_size": item.get("body_size"),
+                "body_truncated": item.get("body_truncated"),
+                "location": location,
+                "error": safe_text(item.get("error", ""), 512) if item.get("error") else "",
+            },
+            code="http_network_response",
+        )
         if location:
             target_host = _host(location)
             current_host = _host(current)
@@ -191,6 +237,7 @@ def analyze_http(ledger: EvidenceLedger, evidence: dict[str, Any]) -> None:
             code="blocked_request",
         )
     if final.get("blocked"):
+        error = final.get("error") if isinstance(final.get("error"), dict) else {}
         ledger.add(
             source="sandbox.http",
             category="network",
@@ -198,7 +245,11 @@ def analyze_http(ledger: EvidenceLedger, evidence: dict[str, Any]) -> None:
             severity="medium",
             confidence=0.8,
             description="The sandbox blocked the final HTTP destination.",
-            data={"url": safe_text(final.get("url", ""), 4096)},
+            data={
+                "url": safe_text(final.get("url", ""), 4096),
+                "policy_code": safe_text(error.get("code", ""), 128),
+                "message": safe_text(error.get("message", ""), 512),
+            },
             code="blocked_request",
         )
     for download in http.get("downloads", [])[:10] if isinstance(http.get("downloads"), list) else []:

@@ -228,12 +228,21 @@ class SandboxSupervisor:
             return False
         return True
 
-    async def _wait_health(self, timeout: float = 35.0) -> bool:
+    def _pid_alive(self, pid: int) -> bool:
+        try:
+            os.kill(pid, 0)
+            return True
+        except OSError:
+            return False
+
+    async def _wait_health(self, timeout: float = 20.0) -> bool:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             if await self.health():
                 return True
-            await asyncio.sleep(0.5)
+            if self.manager_pid is not None and not self._pid_alive(self.manager_pid):
+                return False
+            await asyncio.sleep(0.25)
         return False
 
     def _manager_env(self) -> dict[str, str]:
@@ -308,7 +317,6 @@ class SandboxSupervisor:
                 stdin=asyncio.subprocess.PIPE if sudo_password else None,
                 stdout=handle,
                 stderr=handle,
-                start_new_session=True,
             )
             if sudo_password and process.stdin is not None:
                 try:
